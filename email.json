@@ -1,0 +1,10 @@
+{
+  "host": "smtp.titan.email",
+  "port": 465,
+  "secure": true,
+  "user": "admin@prsci.org.au",
+  "pass": "N3wR@nge2022",
+  "from": "Pine Rivers Shooting Club <admin@prsci.org.au>",
+  "tlsMinVersion": "TLSv1.2"
+  }
+

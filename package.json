@@ -1,0 +1,83 @@
+{
+    "name": "prsc-app",
+    "version": "1.0.5",
+    "private": true,
+    "description": "Pine Rivers Shooting Club – Range Check-In",
+    "main": "main.js",
+    "author": "PRSC",
+    "license": "MIT",
+    "scripts": {
+        "dev": "concurrently -k \"npm:ui:dev\" \"npm:electron:dev\"",
+        "ui:dev": "cd ui && npm run dev",
+        "build": "cd ui && npm run build",
+        "pack": "npm run build && electron-builder --dir",
+        "dist": "npm run build && electron-builder",
+        "electron:dev": "wait-on tcp:5173 && electron .",
+        "start": "electron .",
+        "postinstall": "electron-builder install-app-deps"
+    },
+    "dependencies": {
+        "dist": "^0.1.2",
+        "electron-log": "^5.0.1",
+        "electron-store": "^8.2.0",
+        "electron-updater": "^6.1.8",
+        "exceljs": "^4.4.0",
+        "jszip": "^3.10.1",
+        "nodemailer": "^7.0.5",
+        "odbc": "^2.4.9",
+        "pdfkit": "^0.17.1",
+        "qrcode": "^1.5.4",
+        "react": "^19.1.1",
+        "react-dom": "^19.1.1",
+        "xlsx": "^0.18.5"
+    },
+    "devDependencies": {
+        "concurrently": "^8.2.2",
+        "cross-env": "^7.0.3",
+        "electron": "^37.2.6",
+        "electron-builder": "^24.13.3",
+        "wait-on": "^7.2.0"
+    },
+    "build": {
+        "productName": "PRSC Check-In",
+        "appId": "au.org.prsc.checkin",
+        "directories": {
+            "buildResources": "build",
+            "output": "release"
+        },
+        "win": {
+            "icon": "build/icons/prsc.ico",
+            "target": [
+                {
+                    "target": "nsis",
+                    "arch": [
+                        "x64"
+                    ]
+                }
+            ]
+        },
+        "files": [
+            "main.js",
+            "preload.js",
+            "ui/dist/**/*",
+            "email.json",
+            "assets/**/*"
+        ],
+        "asarUnpack": [
+            "**/*.node"
+        ],
+        "nsis": {
+            "oneClick": false,
+            "perMachine": false,
+            "allowElevation": true,
+            "allowToChangeInstallationDirectory": true
+        },
+        "publish": [
+            {
+                "provider": "github",
+                "owner": "PRSC",
+                "repo": "YOUR_REPO"
+            }
+        ]
+    }
+}
