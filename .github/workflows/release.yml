@@ -1,0 +1,29 @@
+name: Release
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write   # allow the workflow to create releases
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build installer
+        run: npm run dist   # <-- change if your build command is different
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*.exe
