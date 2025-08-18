@@ -5,4 +5,4 @@ coverage/
 *.log
 .env
 .vscode/*
-!.vscode/extensions.json
+!.vscode/extensions.json`nrelease/
