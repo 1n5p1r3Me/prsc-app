@@ -6,3 +6,5 @@ coverage/
 .env
 .vscode/*
 !.vscode/extensions.json`nrelease/
+`nrelease/
+`nrelease/
