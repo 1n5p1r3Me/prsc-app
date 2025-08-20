@@ -13,11 +13,39 @@ const PDFDocument = require('pdfkit');
 let Store = require('electron-store');
 Store = Store.default || Store; // handle ESM default
 
+// --- Force unified userData folder (dev + prod) ---
+const appLabel = 'PRSC Check-In';
+app.setName(appLabel);  // ensures app.getName() matches productName
+app.setPath('userData', path.join(app.getPath('appData'), appLabel));
+// Optional: move volatile caches to %TEMP% so they don't clutter Roaming
+app.setPath('cache', path.join(app.getPath('temp'), `${appLabel}-Cache`));
+
+// ---------- Store ----------
 // ---------- Store ----------
 const store = new Store({
   name: 'prsc-settings',
   defaults: { accdbPath: '', exportsDir: '' }
 });
+
+// Ensure the settings file exists + show where it's going
+const settingsPath = path.join(app.getPath('userData'), 'prsc-settings.json');
+console.log('[PRSC] userData dir:', app.getPath('userData'));
+console.log('[PRSC] electron-store file:', (store && store.path) || settingsPath);
+
+try {
+  if (!fs.existsSync(settingsPath)) {
+    // 1) force first write (electron-store creates the file on set)
+    store.set('__init', new Date().toISOString());
+    // 2) hard fallback (belt-and-braces) — writes a minimal file if still missing
+    if (!fs.existsSync(settingsPath)) {
+      fs.writeFileSync(settingsPath, JSON.stringify(store.store ?? {}, null, 2), 'utf8');
+      console.log('[PRSC] wrote fallback settings to', settingsPath);
+    }
+  }
+} catch (e) {
+  console.error('[PRSC] ensure settings failed:', e);
+}
+
 
 // ---------- Helpers ----------
 const b = (name) => `[${String(name).replace(/]/g, ']]')}]`; // Access bracket escape
@@ -202,14 +230,41 @@ async function buildMemberPdf(record = {}, roName = 'Range Officer', clubName = 
   doc.on('error', rejectFn);
 
   // Header
-  const logo = findLogoPath();
-  if (logo) { try { doc.image(logo, { fit:[56,56], align:'left' }); } catch {} }
-  doc.fontSize(18).text(clubName, logo ? 72 : 0, logo ? 54 : 18, { continued:false });
-  doc.moveDown(logo ? 1.2 : 0.6);
-  doc.fontSize(12).fillColor('#333').text('Competition Participation Confirmation');
-  doc.moveDown(0.5);
-  doc.moveTo(54, doc.y).lineTo(540, doc.y).strokeColor('#999').stroke();
-  doc.moveDown(0.8);
+ // Header — centered, larger logo, small buffer; no duplicate club name text
+// Header — centered logo at top, reserve space, no duplicate club name
+const logo = findLogoPath();
+
+// ensure we start at the very top margin
+doc.y = doc.page.margins.top;
+
+if (logo) {
+  const contentW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const maxW = 220;   // tweak to taste (e.g., 180–260)
+  const maxH = 110;   // vertical space reserved for the logo box
+  const x = doc.page.margins.left + (contentW - maxW) / 2;
+  const y = doc.y;
+
+  // draw logo centered within a fixed box; it won't exceed maxW × maxH
+  try { doc.image(logo, x, y, { fit: [maxW, maxH] }); } catch {}
+
+  // CRUCIAL: move the cursor below the reserved image area + a small buffer
+  doc.y = y + maxH + 20;
+}
+
+// Subtitle — right aligned & bold
+doc.moveDown(0.2);
+doc.font('Helvetica-Bold')
+   .fontSize(14)
+   .fillColor('#111')
+   .text('Competition Participation Confirmation', doc.page.margins.left, doc.y);
+
+// Rule across the full content width
+doc.moveDown(0.4);
+doc.moveTo(doc.page.margins.left, doc.y)
+   .lineTo(doc.page.width - doc.page.margins.right, doc.y)
+   .strokeColor('#999')
+   .stroke();
+doc.moveDown(0.8);
 
   // Body
   const line = (label, value) => {

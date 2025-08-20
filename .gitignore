@@ -9,3 +9,9 @@ coverage/
 `nrelease/
 `nrelease/
 `nrelease/
+node_modules/
+ui/node_modules/
+ui/dist/
+release/
+*.log
+.DS_Store
