@@ -232,48 +232,49 @@ export default function App() {
       if (e.key === 'Enter') {
         const raw = buf;
         buf = '';
-          const text = (raw || '').trim();
-  if (!text) return;
+        const text = (raw || '').trim();
+        if (!text) return;
 
-  // --- NEW: simple RO-unlock via "363" or "financial|363"
-  const cleanedForUnlock = text.replace(/^\d{2}:\d{2}:\d{2}\|/, ''); // drop leading timestamps
-  if (!isUnlocked) {
-    const simpleMatch = cleanedForUnlock.match(/^(?:financial\|)?(\d{3,4}(?:-\d{2})?)$/i);
-    if (simpleMatch) {
-      const memberId = simpleMatch[1];
-      const m = members.find((x) => String(x.memberId) === String(memberId));
-      if (m && (m.isCurrent === undefined || isTrue(m.isCurrent)) && isTrue(m.isRO)) {
-        setRoMember({ memberId: m.memberId, fullName: m.fullName });
-        setIsUnlocked(true);
-        setAdminUnlocked(!kiosk); // keep Admin hidden in kiosk
-        setMsg(`Unlocked by RO ${m.fullName}`);
-      } else {
-        setMsg('Only current Range Officers can unlock.');
-      }
-      return; // don't fall through to check-in parsing
-    }
-  }
+        // ----- UNLOCK PATHS -----
+        // Remove leading timestamp like "00:00:00|"
+        const cleaned = text.replace(/^\d{2}:\d{2}:\d{2}\|/, '');
 
-  // Unlock path – RO scan while locked: PRSC|<id>|...
-
-
-        // Unlock path – RO scan while locked: PRSC|<id>|...
-        if (!isUnlocked && text.startsWith('PRSC|')) {
-          const [, memberId] = text.split('|');
+        // 1) Existing PRSC payload (now also requires isCurrent)
+        if (!isUnlocked && cleaned.startsWith('PRSC|')) {
+          const [, memberId] = cleaned.split('|');
           const m = members.find((x) => String(x.memberId) === String(memberId));
-          if (m && isTrue(m.isRO)) {
+          if (m && isTrue(m.isRO) && isTrue(m.isCurrent)) {
             setRoMember({ memberId: m.memberId, fullName: m.fullName });
             setIsUnlocked(true);
             setAdminUnlocked(!kiosk); // keep admin hidden in kiosk
             setMsg(`Unlocked by RO ${m.fullName}`);
             return;
           }
+          setMsg('Only a current Range Officer can unlock.');
+          return;
         }
 
-        // Remove leading timestamp like "00:00:00|"
-        const cleaned = text.replace(/^\d{2}:\d{2}:\d{2}\|/, '');
+        // 2) NEW: Bare Member ID QR unlock (e.g., "1234" or "0456-01"); requires isCurrent + isRO
+        if (!isUnlocked) {
+          const memberIdPattern = /^\d{3,4}(?:-\d{2})?$/; // 3–4 digits, optional "-NN"
+          if (memberIdPattern.test(cleaned)) {
+            const memberId = cleaned;
+            const m = members.find((x) => String(x.memberId) === String(memberId));
+            if (m && isTrue(m.isRO) && isTrue(m.isCurrent)) {
+              setRoMember({ memberId: m.memberId, fullName: m.fullName });
+              setIsUnlocked(true);
+              setAdminUnlocked(!kiosk);
+              setMsg(`Unlocked by RO ${m.fullName}`);
+              return;
+            }
+            setMsg('Only a current Range Officer can unlock.');
+            return;
+          }
+        }
+        // ----- END UNLOCK PATHS -----
 
-        // Primary formats
+        // Primary formats for check-in scanning (when unlocked)
+        // “PRSC|...” member card
         if (cleaned.startsWith('PRSC|')) {
           const parts = cleaned.split('|');
           const memberId = parts[1] || '';
@@ -298,6 +299,7 @@ export default function App() {
           return;
         }
 
+        // “financial|<memberId>” fallback
         const finMatch = cleaned.match(/(?:^|[|])financial\|([A-Za-z0-9-]+)$/i);
         if (finMatch) {
           const memberId = finMatch[1];
@@ -314,42 +316,30 @@ export default function App() {
           return;
         }
 
-        // ---- Heuristics for fallback: member ID vs licence ----
-const trimmed = cleaned.trim();
-
-// Licence first: optional alpha prefix + 6–10 digits
-const licencePattern = /^(?:[A-Z]{2,4}\s*)?\d{6,10}$/i;
-
-// Member IDs: 3–4 digits, optional "-NN"
-const memberIdPattern = /^\d{3,4}(?:-\d{2})?$/;
-
-if (licencePattern.test(trimmed)) {
-  setLicNo(trimmed);
-  setCurrent((s) => ({ ...s })); // don't touch memberId
-  setMsg('Licence/ID captured');
-  return;
-}
-
-if (memberIdPattern.test(trimmed)) {
-  const memberId = trimmed;
-  const m = members.find((x) => String(x.memberId) === String(memberId));
-  if (m) {
-    setCurrent({ memberId, fullName: m.fullName || '', email: m.email || '', licenceNo: m.licenceNo || '' });
-    setLicNo(m.licenceNo || '');
-  } else {
-    setCurrent({ memberId, fullName: '', email: '', licenceNo: '' });
-    setLicNo('');
-  }
-  setPartType('COMP');
-  setMsg(`Scanned ${memberId}`);
-  return;
-}
-
+        // ---- Heuristics for fallback: licence vs member ID ----
+        const trimmed = cleaned.trim();
+        const licencePattern = /^(?:[A-Z]{2,4}\s*)?\d{6,10}$/i;     // optional alpha + 6–10 digits
+        const memberIdPattern = /^\d{3,4}(?:-\d{2})?$/;             // 3–4 digits, optional "-NN"
 
         if (licencePattern.test(trimmed)) {
           setLicNo(trimmed);
           setCurrent((s) => ({ ...s })); // don't touch memberId
           setMsg('Licence/ID captured');
+          return;
+        }
+
+        if (memberIdPattern.test(trimmed)) {
+          const memberId = trimmed;
+          const m = members.find((x) => String(x.memberId) === String(memberId));
+          if (m) {
+            setCurrent({ memberId, fullName: m.fullName || '', email: m.email || '', licenceNo: m.licenceNo || '' });
+            setLicNo(m.licenceNo || '');
+          } else {
+            setCurrent({ memberId, fullName: '', email: '', licenceNo: '' });
+            setLicNo('');
+          }
+          setPartType('COMP');
+          setMsg(`Scanned ${memberId}`);
           return;
         }
 
@@ -533,8 +523,7 @@ if (memberIdPattern.test(trimmed)) {
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-            <img src="prsc-logo.png" alt="PRSC logo" style={{ height: 48 }} />
-
+            <img src="/prsc-logo.png" alt="PRSC logo" style={{ height: 48 }} />
             <div>
               <div style={{ fontWeight: 700, fontSize: 18 }}>Pine Rivers Shooting Club</div>
               <div style={{ opacity: 0.8, fontSize: 12 }}>Range Check-In — Locked</div>
@@ -625,7 +614,7 @@ if (memberIdPattern.test(trimmed)) {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <img src="prsc-logo.png" alt="PRSC logo" style={{ height: 48 }} />
+          <img src="/prsc-logo.png" alt="PRSC logo" style={{ height: 48, width: 'auto' }} />
           <div>
             <div style={{ fontWeight: 700, fontSize: 18 }}>Pine Rivers Shooting Club</div>
             <div style={{ opacity: 0.9, fontSize: 12 }}>Range Check-In</div>
@@ -659,37 +648,23 @@ if (memberIdPattern.test(trimmed)) {
               Unlocked by <b>{roMember?.fullName}</b>
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-              <button onClick={chooseDb} style={btn}>
-                Choose Database
-              </button>
-              <button onClick={syncFinancial} style={{ ...btn, background: '#166534', color: '#fff' }}>
-                Sync financial members
-              </button>
-              <button onClick={exportQRCodesToFolder} style={btn}>
-                QR codes
-              </button>
-              <button onClick={finalizeParticipation} style={btn}>
-                Participation Finalisation
-              </button>
-              <button onClick={pickExportsFolder} style={btn}>
-                Choose Participation folder
-              </button>
+              <button onClick={chooseDb} style={btn}>Choose Database</button>
+              <button onClick={syncFinancial} style={{ ...btn, background: '#166534', color: '#fff' }}>Sync financial members</button>
+              <button onClick={exportQRCodesToFolder} style={btn}>QR codes</button>
+              <button onClick={finalizeParticipation} style={btn}>Participation Finalisation</button>
+              <button onClick={pickExportsFolder} style={btn}>Choose Participation folder</button>
             </div>
             {exportsDir && (
               <div style={{ fontSize: 12, color: '#444', margin: '-6px 0 8px 0' }}>
                 Saving to: <b>{exportsDir}</b>
               </div>
             )}
-            {msg && (
-  <div style={{ background: '#fff7ed', color: '#7c2d12', padding: 8, borderRadius: 8, fontSize: 12 }}>
-    {msg}
-  </div>
-)}
 
-<div style={{ marginTop: 12, maxHeight: 320, overflow: 'auto', border: '1px solid #eee', borderRadius: 8 }}>
-  <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse', color: '#111' }}>
-    <thead style={{ position: 'sticky', top: 0, background: '#fafafa', color: '#111' }}>
+            {msg && <div style={{ background: '#fff7ed', color: '#7c2d12', padding: 8, borderRadius: 8, fontSize: 12 }}>{msg}</div>}
 
+            <div style={{ marginTop: 12, maxHeight: 320, overflow: 'auto', border: '1px solid #eee', borderRadius: 8 }}>
+              <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse', color: '#111' }}>
+                <thead style={{ position: 'sticky', top: 0, background: '#fafafa', color: '#111' }}>
                   <tr>
                     <th style={th}>Member</th>
                     <th style={th}>Email</th>
@@ -702,24 +677,18 @@ if (memberIdPattern.test(trimmed)) {
                 <tbody>
                   {members.length === 0 ? (
                     <tr>
-                      <td colSpan={6} style={{ padding: 10, color: '#444' }}>
-                        No members (sync to load).
-                      </td>
+                      <td colSpan={6} style={{ padding: 10, color: '#444' }}>No members (sync to load).</td>
                     </tr>
                   ) : (
                     members.map((m) => (
                       <tr key={m.memberId}>
-                        <td style={td}>
-                          {m.fullName} <span style={{ color: '#555' }}>({m.memberId})</span>
-                        </td>
+                        <td style={td}>{m.fullName} <span style={{ color: '#555' }}>({m.memberId})</span></td>
                         <td style={td}>{m.email || ''}</td>
                         <td style={td}>{m.licenceNo || ''}</td>
                         <td style={td}>{fmtDate(m.joinDate)}</td>
                         <td style={td}>{isTrue(m.isRO) ? 'Yes' : ''}</td>
                         <td style={td}>
-                          <button style={miniBtn} onClick={() => onPickMember(m)}>
-                            Use in check-in
-                          </button>
+                          <button style={miniBtn} onClick={() => onPickMember(m)}>Use in check-in</button>
                         </td>
                       </tr>
                     ))
@@ -811,9 +780,7 @@ if (memberIdPattern.test(trimmed)) {
           </div>
 
           <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-            <button onClick={startCheckin} style={{ ...btn, background: '#166534', color: '#fff' }}>
-              Check-In
-            </button>
+            <button onClick={startCheckin} style={{ ...btn, background: '#166534', color: '#fff' }}>Check-In</button>
           </div>
 
           {/* Verify panel */}
@@ -821,9 +788,8 @@ if (memberIdPattern.test(trimmed)) {
             <div style={{ marginTop: 12, border: '1px solid #ddd', borderRadius: 8, padding: 12, background: '#f9fafb' }}>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>Range Officer Verification</div>
               <div style={{ fontSize: 13, marginBottom: 8 }}>
-                Member: <b>{pendingRow.name}</b> ({pendingRow.memberId}) • Participation: {pendingRow.participationType} • Firearm:{' '}
-                {pendingRow.firearm === 'H' ? 'Pistol (H)' : 'Long arms (A/B)'} • Class: {pendingRow.klass} • Competition: {pendingRow.competition} • Date:{' '}
-                {pendingRow.shootDate}
+                Member: <b>{pendingRow.name}</b> ({pendingRow.memberId}) • Participation: {pendingRow.participationType} • Firearm{' '}
+                {pendingRow.firearm === 'H' ? 'Pistol (H)' : 'Long arms (A/B)'} • Class {pendingRow.klass} • Competition {pendingRow.competition} • Date {pendingRow.shootDate}
               </div>
 
               {roList.length > 0 ? (
@@ -860,9 +826,7 @@ if (memberIdPattern.test(trimmed)) {
               )}
 
               <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                <button onClick={confirmVerifyAndSave} style={{ ...btn, background: '#166534', color: '#fff' }}>
-                  Confirm & Save
-                </button>
+                <button onClick={confirmVerifyAndSave} style={{ ...btn, background: '#166534', color: '#fff' }}>Confirm & Save</button>
                 <button
                   onClick={() => {
                     setVerifyOpen(false);
@@ -898,17 +862,13 @@ if (memberIdPattern.test(trimmed)) {
               <tbody>
                 {checkins.length === 0 ? (
                   <tr>
-                    <td colSpan={9} style={{ padding: 10, color: '#666' }}>
-                      No check-ins yet.
-                    </td>
+                    <td colSpan={9} style={{ padding: 10, color: '#666' }}>No check-ins yet.</td>
                   </tr>
                 ) : (
                   checkins.map((r, i) => (
                     <tr key={i}>
                       <td style={td}>{new Date(r.timestamp).toLocaleString()}</td>
-                      <td style={td}>
-                        {r.name} ({r.memberId})
-                      </td>
+                      <td style={td}>{r.name} ({r.memberId})</td>
                       <td style={td}>{r.firearm === 'H' ? 'Pistol (H)' : 'Long arms (A/B)'}</td>
                       <td style={td}>{r.klass}</td>
                       <td style={td}>{r.competition === 'TARGET' ? 'Target' : 'Metal Silhouette'}</td>
@@ -937,4 +897,3 @@ const th = { textAlign: 'left', padding: '8px', borderBottom: '1px solid #eee' }
 const td = { padding: '8px', borderTop: '1px solid #f2f2f2', verticalAlign: 'top', color: '#111' };
 const label = { display: 'grid', gap: 6, fontSize: 12, color: '#111' };
 const input = { border: '1px solid #ddd', borderRadius: 8, padding: '8px 10px', color: '#111', background: '#fff' };
-
