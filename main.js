@@ -1,6 +1,6 @@
 // ===============================
 // main.js — PRSC Electron Main (icon‑ready)
-// ===============================
+// Version bump to v1.0.9// ===============================
 // NOTE: Only icon handling was added/changed. App logic is unchanged.
 
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
@@ -12,6 +12,9 @@ const nodemailer = require('nodemailer');
 const PDFDocument = require('pdfkit');
 let Store = require('electron-store');
 Store = Store.default || Store; // handle ESM default
+// --- Auto‑update ---
+const { autoUpdater } = require('electron-updater');
+const log = require('electron-log'); // you already depend on this
 
 // --- Force unified userData folder (dev + prod) ---
 const appLabel = 'PRSC Check-In';
@@ -51,6 +54,33 @@ try {
 const b = (name) => `[${String(name).replace(/]/g, ']]')}]`; // Access bracket escape
 const isTrue = (v) => (v === true || v === 1 || v === -1 || String(v ?? '').toLowerCase() === 'true' || String(v ?? '').toLowerCase() === 'yes');
 const dayTag = (d = new Date()) => new Date(d).toISOString().slice(0,10);
+// Configure autoUpdater logging & feed
+log.transports.file.level = 'info';
+autoUpdater.logger = log;
+
+// Optional: don’t spam update checks in dev
+const checkUpdatesSafe = () => {
+  if (!app.isPackaged) {
+    log.info('[autoUpdater] Skipping (not packaged)');
+    return;
+  }
+  try {
+    autoUpdater.checkForUpdatesAndNotify();
+  } catch (e) {
+    log.error('[autoUpdater] check failed', e);
+  }
+};
+
+// Useful diagnostics
+autoUpdater.on('error', (err) => log.error('[autoUpdater] error', err));
+autoUpdater.on('checking-for-update', () => log.info('[autoUpdater] checking-for-update'));
+autoUpdater.on('update-available', (info) => log.info('[autoUpdater] update-available', info));
+autoUpdater.on('update-not-available', (info) => log.info('[autoUpdater] update-not-available', info));
+autoUpdater.on('download-progress', (p) => log.info('[autoUpdater] download-progress', p));
+autoUpdater.on('update-downloaded', (info) => {
+  log.info('[autoUpdater] update-downloaded; will install on quit');
+  // autoUpdater.quitAndInstall(); // if you want immediate apply; I’m leaving notify-only behavior
+});
 
 // NEW: find a Windows .ico for BrowserWindow
 function findWinIcon() {
@@ -94,8 +124,10 @@ app.setAppUserModelId('au.org.prsc.checkin'); // Windows taskbar grouping / noti
 app.whenReady().then(() => {
   createWindow();
   app.on('activate', () => BrowserWindow.getAllWindows().length === 0 && createWindow());
-});
+setTimeout(checkUpdatesSafe, 1500);
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+});
+
 
 // ---------- Access / ODBC ----------
 function getConnStr () {
