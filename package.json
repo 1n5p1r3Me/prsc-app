@@ -1,6 +1,6 @@
 {
     "name": "prsc-app",
-    "version": "1.0.7",
+    "version": "1.0.9",
     "private": true,
     "description": "Pine Rivers Shooting Club – Range Check-In",
     "main": "main.js",
@@ -38,40 +38,40 @@
         "electron-builder": "^24.13.3",
         "wait-on": "^7.2.0"
     },
-   "build": {
-  "productName": "PRSC Check-In",
-  "appId": "au.org.prsc.checkin",
-  "directories": {
-    "buildResources": "build",
-    "output": "release"
-  },
-  "win": {
-    "icon": "build/icons/prsc.ico"
-  },
-  "files": [
-    "main.js",
-    "preload.js",
-    "ui/dist/**/*",
-    "email.json",
-    "assets/**/*"
-  ],
-  "asarUnpack": [
-    "**/*.node"
-  ],
-  "nsis": {
-    "oneClick": false,
-    "perMachine": false,
-    "allowElevation": true,
-    "allowToChangeInstallationDirectory": true,
-    "installerIcon": "build/icons/prsc.ico",
-    "uninstallerIcon": "build/icons/prsc.ico"
-  },
-  "publish": [
-    {
-      "provider": "github",
-      "owner": "1n5p1r3Me",
-      "repo": "PRSC"
+    "build": {
+        "productName": "PRSC Check-In",
+        "appId": "au.org.prsc.checkin",
+        "directories": {
+            "buildResources": "build",
+            "output": "release"
+        },
+        "win": {
+            "icon": "build/icons/prsc.ico"
+        },
+        "files": [
+            "main.js",
+            "preload.js",
+            "ui/dist/**/*",
+            "email.json",
+            "assets/**/*"
+        ],
+        "asarUnpack": [
+            "**/*.node"
+        ],
+        "nsis": {
+            "oneClick": false,
+            "perMachine": false,
+            "allowElevation": true,
+            "allowToChangeInstallationDirectory": true,
+            "installerIcon": "build/icons/prsc.ico",
+            "uninstallerIcon": "build/icons/prsc.ico"
+        },
+        "publish": [
+            {
+                "provider": "github",
+                "owner": "1n5p1r3Me",
+                "repo": "PRSC"
+            }
+        ]
     }
-  ]
-}
 }
