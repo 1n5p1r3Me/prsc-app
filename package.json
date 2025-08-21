@@ -1,6 +1,6 @@
 {
     "name": "prsc-app",
-    "version": "1.0.8",
+    "version": "1.0.9",
     "private": true,
     "description": "Pine Rivers Shooting Club – Range Check-In",
     "main": "main.js",
