@@ -15,3 +15,4 @@ ui/dist/
 release/
 *.log
 .DS_Store
+"# bump to v1.0.9" 
