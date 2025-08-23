@@ -52,12 +52,18 @@ export default function App() {
   const [pendingRow, setPendingRow] = useState(null);
   const [verifierId, setVerifierId] = useState('');
   const [verifierNameManual, setVerifierNameManual] = useState('');
+  // NEW: F33 optional flag
+  const [f33Checked, setF33Checked] = useState(false);
 
   // Recent check-ins
   const [checkins, setCheckins] = useState([]);
 
   // Exports folder
   const [exportsDir, setExportsDir] = useState('');
+
+  // --- Safety Brief (Admin) ---
+  const [safetyDeliveredBy, setSafetyDeliveredBy] = useState('');
+  const [safetyVerifiedBy, setSafetyVerifiedBy] = useState('');
 
   // Electron bridge
   const bridge = useMemo(() => (window?.electronAPI || {}), []);
@@ -146,16 +152,36 @@ export default function App() {
       setMsg('No check-ins to finalise yet.');
       return;
     }
+
+    // NEW: enforce Safety Brief selection before attempting finalisation
+    if (!String(safetyDeliveredBy || '').trim() || !String(safetyVerifiedBy || '').trim()) {
+      setMsg('Complete the Safety Brief first: select both “Delivered by” and “Brief Verified by”.');
+      return;
+    }
+
     try {
       if (bridge.finalizeParticipation) {
+        // Resolve names from IDs for nicer CSV columns
+        const delivered = members.find(m => String(m.memberId) === String(safetyDeliveredBy));
+        const verified  = members.find(m => String(m.memberId) === String(safetyVerifiedBy));
+
         const res = await bridge.finalizeParticipation({
           checkins,
           exportsDir,
           to: 'admin@prsci.org.au',
           shootDate,
+          // NEW: event-level Safety Brief metadata
+          safetyBrief: {
+            deliveredById: safetyDeliveredBy || '',
+            deliveredByName: delivered?.fullName || '',
+            verifiedById: safetyVerifiedBy || '',
+            verifiedByName: verified?.fullName || ''
+          }
         });
         if (res?.ok) {
           setMsg(`Saved ${res.savedAs || 'workbook'} to ${res.folder || exportsDir} and emailed to ${res.to || 'admin@prsci.org.au'}.`);
+        } else if (res?.error === 'missing-safety-brief') {
+          setMsg('Complete the Safety Brief first: select both “Delivered by” and “Brief Verified by”.');
         } else {
           setMsg(res?.error || 'Finalisation failed.');
         }
@@ -375,44 +401,96 @@ if (memberIdPattern.test(trimmed)) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [isUnlocked, members, kiosk]);
+  // Reset firearm/class/comp/licence/ID when switching to Spectator
+useEffect(() => {
+  if (partType === 'SPECTATOR') {
+    setFirearm('');
+    setKlass('');
+    setComp('');
+    setLicNo('');
+    setIdType('');
+  }
+}, [partType]);
 
   // ---- Two-step verify flow ----
-  function startCheckin() {
-    if (!isUnlocked) {
-      setMsg('Please unlock by Range Officer (scan RO card or enter PIN).');
-      return;
-    }
-    if (!current.memberId || !firearm || !klass || !comp || !partType) {
-      setMsg('Please fill member + all fields (including Participation Type).');
-      return;
-    }
-    if (partType === 'VISITOR' && !idType.trim()) {
-      setMsg('Please enter the visitor ID type/number.');
-      return;
-    }
+function startCheckin() {
+  if (!isUnlocked) {
+    setMsg('Please unlock by Range Officer (scan RO card or enter PIN).');
+    return;
+  }
 
+  // --- Spectator: only Full Name, no verification, clear other fields
+  if (partType === 'SPECTATOR') {
+    if (!current.fullName.trim()) {
+      setMsg('Please enter Full Name for spectators.');
+      return;
+    }
     const row = {
       timestamp: new Date().toISOString(),
       shootDate,
-      memberId: current.memberId,
+      memberId: current.memberId || '',   // allow blank memberId for spectator
       name: current.fullName,
-      firearm,
-      klass,
-      competition: comp,
-      participationType: partType,
-      licenceType: partType === 'VISITOR' ? 'ID' : licNo ? 'licensed' : '',
-      licenceNo: partType === 'VISITOR' ? idType : licNo || current.licenceNo || '',
+      firearm: '',
+      klass: '',
+      competition: '',
+      participationType: 'SPECTATOR',
+      licenceType: '',
+      licenceNo: '',
       licenceVerified: false,
       verifiedBy: '',
+      f33: ''
     };
+    setCheckins(prev => [row, ...prev]);
+    try { bridge.appendCheckin && bridge.appendCheckin(row); } catch {}
+    setMsg('Spectator check-in saved.');
 
-    const defaultVerifier = roList.find((ro) => String(ro.memberId) !== String(row.memberId));
-    setVerifierId(defaultVerifier ? String(defaultVerifier.memberId) : '');
-    setVerifierNameManual('');
-    setPendingRow(row);
-    setVerifiedChecked(false);
-    setVerifyOpen(true);
+    // reset form so nothing carries forward
+    setCurrent({ memberId: '', fullName: '', email: '', licenceNo: '' });
+    setFirearm('');
+    setKlass('');
+    setComp('');
+    setLicNo('');
+    setPartType('');
+    setIdType('');
+    return;
   }
+
+  // --- Non‑spectator flow: class optional only for Longarms A/B
+  if (!current.memberId || !firearm || (!klass && firearm !== 'AB') || !comp || !partType) {
+    setMsg('Please fill member + all fields (including Participation Type).');
+    return;
+  }
+
+  // Visitor must provide ID info
+  if (partType === 'VISITOR' && !idType.trim()) {
+    setMsg('Please enter the visitor ID type/number.');
+    return;
+  }
+
+  // Build row and open verify panel
+  const row = {
+    timestamp: new Date().toISOString(),
+    shootDate,
+    memberId: current.memberId,
+    name: current.fullName,
+    firearm,
+    klass: firearm === 'AB' ? '' : klass,
+    competition: comp,
+    participationType: partType,
+    licenceType: partType === 'VISITOR' ? 'ID' : licNo ? 'licensed' : '',
+    licenceNo: partType === 'VISITOR' ? idType : (licNo || current.licenceNo || ''),
+    licenceVerified: false,
+    verifiedBy: '',
+  };
+
+  const defaultVerifier = roList.find(ro => String(ro.memberId) !== String(row.memberId));
+  setVerifierId(defaultVerifier ? String(defaultVerifier.memberId) : '');
+  setVerifierNameManual('');
+  setPendingRow(row);
+  setVerifiedChecked(false);
+  setF33Checked(false);
+  setVerifyOpen(true);
+}
 
   async function confirmVerifyAndSave() {
     if (!pendingRow) return;
@@ -448,6 +526,8 @@ if (memberIdPattern.test(trimmed)) {
       ...pendingRow,
       licenceVerified: mustTick ? !!verifiedChecked : false,
       verifiedBy: verifierFullName,
+      // NEW: carry F33 as "Y" if ticked, else empty
+      f33: f33Checked ? 'Y' : '',
     };
 
     setCheckins((prev) => [final, ...prev]);
@@ -481,6 +561,7 @@ if (memberIdPattern.test(trimmed)) {
     setVerifyOpen(false);
     setPendingRow(null);
     setVerifiedChecked(false);
+    setF33Checked(false); // NEW: reset
     setVerifierId('');
     setVerifierNameManual('');
     setCurrent({ memberId: '', fullName: '', email: '', licenceNo: '' });
@@ -660,36 +741,58 @@ if (memberIdPattern.test(trimmed)) {
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
               <button onClick={chooseDb} style={btn}>
-                Choose Database
+            Choose Database
               </button>
-              <button onClick={syncFinancial} style={{ ...btn, background: '#166534', color: '#fff' }}>
-                Sync financial members
-              </button>
-              <button onClick={exportQRCodesToFolder} style={btn}>
-                QR codes
-              </button>
-              <button onClick={finalizeParticipation} style={btn}>
-                Participation Finalisation
+              <button onClick={syncFinancial} style={btn}>
+            Sync financial members
               </button>
               <button onClick={pickExportsFolder} style={btn}>
-                Choose Participation folder
+            Choose Participation folder
               </button>
+              <button onClick={finalizeParticipation} style={{ ...btn, background: '#166534', color: '#fff' }}>
+            Participation Finalisation
+              </button>
+</div>
+
+
+            {/* Pre‑Competition Safety Brief (Admin) */}
+            <div style={{ marginTop: 16, padding: 12, border: '1px solid #eee', borderRadius: 8, background: '#fafafa' }}>
+              <h3 style={{ margin: '0 0 8px 0', fontSize: 14 }}>Pre‑Competition Safety Brief</h3>
+
+              <label style={{ display: 'grid', gap: 6, fontSize: 12, marginBottom: 8 }}>
+                <span>Delivered by:</span>
+                <select value={safetyDeliveredBy} onChange={(e) => setSafetyDeliveredBy(e.target.value)} style={input}>
+                  <option value="">Select Member or RO…</option>
+                  {members.map((m) => (
+                    <option key={m.memberId} value={m.memberId}>
+                      {m.fullName} ({m.memberId})
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label style={{ display: 'grid', gap: 6, fontSize: 12 }}>
+                <span>Brief Verified by:</span>
+                <select value={safetyVerifiedBy} onChange={(e) => setSafetyVerifiedBy(e.target.value)} style={input}>
+                  <option value="">Select RO…</option>
+                  {roList.map((ro) => (
+                    <option key={ro.memberId} value={ro.memberId}>
+                      {ro.fullName} ({ro.memberId})
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
-            {exportsDir && (
-              <div style={{ fontSize: 12, color: '#444', margin: '-6px 0 8px 0' }}>
-                Saving to: <b>{exportsDir}</b>
+
+            {msg && (
+              <div style={{ background: '#fff7ed', color: '#7c2d12', padding: 8, borderRadius: 8, fontSize: 12 }}>
+                {msg}
               </div>
             )}
-            {msg && (
-  <div style={{ background: '#fff7ed', color: '#7c2d12', padding: 8, borderRadius: 8, fontSize: 12 }}>
-    {msg}
-  </div>
-)}
 
-<div style={{ marginTop: 12, maxHeight: 320, overflow: 'auto', border: '1px solid #eee', borderRadius: 8 }}>
-  <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse', color: '#111' }}>
-    <thead style={{ position: 'sticky', top: 0, background: '#fafafa', color: '#111' }}>
-
+            <div style={{ marginTop: 12, maxHeight: 320, overflow: 'auto', border: '1px solid #eee', borderRadius: 8 }}>
+              <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse', color: '#111' }}>
+                <thead style={{ position: 'sticky', top: 0, background: '#fafafa', color: '#111' }}>
                   <tr>
                     <th style={th}>Member</th>
                     <th style={th}>Email</th>
@@ -745,7 +848,7 @@ if (memberIdPattern.test(trimmed)) {
               <input value={current.memberId} onChange={(e) => setCurrent((s) => ({ ...s, memberId: e.target.value }))} style={input} />
             </label>
             <label style={label}>
-              Full name
+              Full Name
               <input value={current.fullName} onChange={(e) => setCurrent((s) => ({ ...s, fullName: e.target.value }))} style={input} />
             </label>
             <label style={label}>
@@ -753,20 +856,22 @@ if (memberIdPattern.test(trimmed)) {
               <input value={current.email} onChange={(e) => setCurrent((s) => ({ ...s, email: e.target.value }))} style={input} />
             </label>
             <label style={label}>
-              Licence number
+              Licence Number
               <input value={licNo} onChange={(e) => setLicNo(e.target.value)} style={input} placeholder="if licensed" />
             </label>
             <label style={label}>
-              Firearm today
-              <select value={firearm} onChange={(e) => setFirearm(e.target.value)} style={input}>
+              Firearm Category
+              <select value={firearm} onChange={(e) => setFirearm(e.target.value)} disabled={partType === 'SPECTATOR'} style={input}>
                 <option value="">Select…</option>
                 <option value="H">Pistol – Category H</option>
-                <option value="AB">Long arms – Category A/B</option>
+                <option value="AB">Longarms – Category A/B</option>
               </select>
             </label>
             <label style={label}>
               Class (A/B/C/D)
-              <select value={klass} onChange={(e) => setKlass(e.target.value)} style={input}>
+              <select value={klass} onChange={(e) => setKlass(e.target.value)}
+  disabled={partType === 'SPECTATOR' || firearm === 'AB'} // AB shooters also don’t need Class 
+  style={input}>
                 <option value="">Select…</option>
                 <option value="A">A – Air</option>
                 <option value="B">B – Centrefire ≤ .38 & black powder</option>
@@ -776,12 +881,19 @@ if (memberIdPattern.test(trimmed)) {
             </label>
             <label style={label}>
               Competition
-              <select value={comp} onChange={(e) => setComp(e.target.value)} style={input}>
-                <option value="">Select…</option>
+              <select
+              value={comp}
+              onChange={(e) => setComp(e.target.value)}
+              disabled={partType === 'SPECTATOR'}
+              style={input}
+              >
+               <option value="">Select…</option>
                 <option value="TARGET">Target</option>
                 <option value="SILHOUETTE">Metal Silhouette</option>
-              </select>
-            </label>
+                <option value="WESTERN">Western Action</option>
+                </select>
+              </label>
+
             <label style={label}>
               Competition date
               <input type="date" value={shootDate} onChange={(e) => setShootDate(e.target.value)} style={input} />
@@ -821,8 +933,8 @@ if (memberIdPattern.test(trimmed)) {
             <div style={{ marginTop: 12, border: '1px solid #ddd', borderRadius: 8, padding: 12, background: '#f9fafb' }}>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>Range Officer Verification</div>
               <div style={{ fontSize: 13, marginBottom: 8 }}>
-                Member: <b>{pendingRow.name}</b> ({pendingRow.memberId}) • Participation: {pendingRow.participationType} • Firearm:{' '}
-                {pendingRow.firearm === 'H' ? 'Pistol (H)' : 'Long arms (A/B)'} • Class: {pendingRow.klass} • Competition: {pendingRow.competition} • Date:{' '}
+                Member: <b>{pendingRow.name}</b> ({pendingRow.memberId}) • Participation: {pendingRow.participationType} • Firearm{' '}
+                {pendingRow.firearm === 'H' ? 'Pistol (H)' : 'Longarms (A/B)'} • Class {pendingRow.klass} • Competition {pendingRow.competition} • Date{' '}
                 {pendingRow.shootDate}
               </div>
 
@@ -859,6 +971,12 @@ if (memberIdPattern.test(trimmed)) {
                 </label>
               )}
 
+              {/* NEW: F33 checkbox (optional) */}
+              <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, marginTop: 6 }}>
+                <input type="checkbox" checked={f33Checked} onChange={(e) => setF33Checked(e.target.checked)} />
+                F33 (tick if completed and signed)
+              </label>
+
               <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
                 <button onClick={confirmVerifyAndSave} style={{ ...btn, background: '#166534', color: '#fff' }}>
                   Confirm & Save
@@ -868,6 +986,7 @@ if (memberIdPattern.test(trimmed)) {
                     setVerifyOpen(false);
                     setPendingRow(null);
                     setVerifiedChecked(false);
+                    setF33Checked(false); // NEW: reset on cancel
                     setVerifierId('');
                     setVerifierNameManual('');
                   }}
@@ -906,12 +1025,20 @@ if (memberIdPattern.test(trimmed)) {
                   checkins.map((r, i) => (
                     <tr key={i}>
                       <td style={td}>{new Date(r.timestamp).toLocaleString()}</td>
+                      <td style={td}>{r.name}{r.memberId ? ` (${r.memberId})` : ''}</td>
                       <td style={td}>
-                        {r.name} ({r.memberId})
-                      </td>
-                      <td style={td}>{r.firearm === 'H' ? 'Pistol (H)' : 'Long arms (A/B)'}</td>
+                    {r.firearm ? (r.firearm === 'H' ? 'Pistol (H)' : 'Long arms (A/B)') : ''}</td>
                       <td style={td}>{r.klass}</td>
-                      <td style={td}>{r.competition === 'TARGET' ? 'Target' : 'Metal Silhouette'}</td>
+                      <td style={td}>
+  {r.competition === 'TARGET'
+    ? 'Target'
+    : r.competition === 'SILHOUETTE'
+    ? 'Metal Silhouette'
+    : r.competition === 'WESTERN'
+    ? 'Western Action'
+    : ''}
+</td>
+
                       <td style={td}>{r.shootDate || ''}</td>
                       <td style={td}>{r.licenceType ? (r.licenceVerified ? 'Yes' : 'No') : 'N/A'}</td>
                       <td style={td}>{r.verifiedBy || ''}</td>
@@ -937,4 +1064,3 @@ const th = { textAlign: 'left', padding: '8px', borderBottom: '1px solid #eee' }
 const td = { padding: '8px', borderTop: '1px solid #f2f2f2', verticalAlign: 'top', color: '#111' };
 const label = { display: 'grid', gap: 6, fontSize: 12, color: '#111' };
 const input = { border: '1px solid #ddd', borderRadius: 8, padding: '8px 10px', color: '#111', background: '#fff' };
-

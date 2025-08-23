@@ -1,6 +1,7 @@
 // ===============================
 // main.js — PRSC Electron Main (icon‑ready)
-// Version bump to v1.0.9// ===============================
+// Version bump to v1.0.9
+// ===============================
 // NOTE: Only icon handling was added/changed. App logic is unchanged.
 
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
@@ -78,7 +79,7 @@ autoUpdater.on('update-available', (info) => log.info('[autoUpdater] update-avai
 autoUpdater.on('update-not-available', (info) => log.info('[autoUpdater] update-not-available', info));
 autoUpdater.on('download-progress', (p) => log.info('[autoUpdater] download-progress', p));
 autoUpdater.on('update-downloaded', (info) => {
-  log.info('[autoUpdater] update-downloaded; will install on quit');
+  log.info('[autoUpdater] update-downloaded; will install on quit]');
   // autoUpdater.quitAndInstall(); // if you want immediate apply; I’m leaving notify-only behavior
 });
 
@@ -220,24 +221,28 @@ ipcMain.handle('pickSaveFolder', async (e) => ipcMain.invoke('pickExportsDir'));
 
 // ---------- Member email helpers ----------
 function buildMemberEmail(record = {}, roName = 'Range Officer') {
-  const fmtDMY = (d) => { try { const dt = new Date(d); return `${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')}/${dt.getFullYear()}`; } catch { return d || ''; } };
-  const firearm = record.firearm === 'H' ? 'Pistol (H)' : 'Long arms (A/B)';
-  const comp    = record.competition === 'SILHOUETTE' ? 'Metal Silhouette' : 'Target';
-  const subject = `Competition Participation for ${firearm} ${record.klass || ''} — ${fmtDMY(record.shootDate)}`.trim();
-  const lines = [
-    `Club: Pine Rivers Shooting Club`,
+  const fmtDMY = (d) => {
+    try {
+      const dt = new Date(d);
+      return `${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')}/${dt.getFullYear()}`;
+    } catch { return d || ''; }
+  };
+
+  // keep on one line so it never splits
+  const firearm = record.firearm === 'H' ? 'Pistol (H)' : 'Longarms (A/B)';
+
+  const subject = `Competition Participation for ${firearm} ${record.klass || ''} — ${fmtDMY(record.shootDate)}`;
+
+  // <-- exactly the three lines you showed, joined into a string
+  const text = [
+    `Thank you for participating in the PRSC competition.`,
     `Location: Belmont SSAA`,
-    `Member Name: ${record.name || ''}`,
-    `Member #: ${record.memberId || ''}`,
-    `Competition date: ${fmtDMY(record.shootDate)}`,
-    `Category: ${firearm}`,
-    `Class: ${record.klass || ''}`,
-    `Competition: ${comp}`,
-    record.licenceType ? `Licence: ${[record.licenceType, record.licenceNo].filter(Boolean).join(' ')}` : null,
-    `Verified by Range Officer – ${roName}`
-  ].filter(Boolean).join('\n');
-  return { subject, text: lines };
+    `Competition date: ${fmtDMY(record.shootDate)}`
+  ].join('\n');
+
+  return { subject, text };
 }
+
 
 function findLogoPath() {
   const tryPaths = [
@@ -250,8 +255,16 @@ function findLogoPath() {
 
 async function buildMemberPdf(record = {}, roName = 'Range Officer', clubName = 'Pine Rivers Shooting Club') {
   const fmtDMY = (d) => { try { const dt = new Date(d); return `${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')}/${dt.getFullYear()}`; } catch { return d || ''; } };
-  const firearm = record.firearm === 'H' ? 'Pistol (H)' : 'Long arms (A/B)';
-  const comp    = record.competition === 'SILHOUETTE' ? 'Metal Silhouette' : 'Target';
+  const firearm = record.firearm === 'H' ? 'Pistol (H)' : 'Longarms (A/B)';
+  // before: const comp = record.competition === 'SILHOUETTE' ? 'Metal Silhouette' : 'Target';
+const compMap = {
+  TARGET: 'Target',
+  SILHOUETTE: 'Metal Silhouette',
+  WESTERN: 'Western Action',
+};
+const comp = compMap[record.competition] || (record.competition || '');
+
+
   const compDate = fmtDMY(record.shootDate);
 
   const doc = new PDFDocument({ size: 'A4', margin: 54 });
@@ -261,42 +274,40 @@ async function buildMemberPdf(record = {}, roName = 'Range Officer', clubName = 
   doc.on('end', () => resolveFn(Buffer.concat(chunks)));
   doc.on('error', rejectFn);
 
-  // Header
- // Header — centered, larger logo, small buffer; no duplicate club name text
-// Header — centered logo at top, reserve space, no duplicate club name
-const logo = findLogoPath();
+  // Header — centered logo at top, reserve space, no duplicate club name
+  const logo = findLogoPath();
 
-// ensure we start at the very top margin
-doc.y = doc.page.margins.top;
+  // ensure we start at the very top margin
+  doc.y = doc.page.margins.top;
 
-if (logo) {
-  const contentW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-  const maxW = 220;   // tweak to taste (e.g., 180–260)
-  const maxH = 110;   // vertical space reserved for the logo box
-  const x = doc.page.margins.left + (contentW - maxW) / 2;
-  const y = doc.y;
+  if (logo) {
+    const contentW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+    const maxW = 220;   // tweak to taste (e.g., 180–260)
+    const maxH = 110;   // vertical space reserved for the logo box
+    const x = doc.page.margins.left + (contentW - maxW) / 2;
+    const y = doc.y;
 
-  // draw logo centered within a fixed box; it won't exceed maxW × maxH
-  try { doc.image(logo, x, y, { fit: [maxW, maxH] }); } catch {}
+    // draw logo centered within a fixed box; it won't exceed maxW × maxH
+    try { doc.image(logo, x, y, { fit: [maxW, maxH] }); } catch {}
 
-  // CRUCIAL: move the cursor below the reserved image area + a small buffer
-  doc.y = y + maxH + 20;
-}
+    // move the cursor below the reserved image area + a small buffer
+    doc.y = y + maxH + 20;
+  }
 
-// Subtitle — right aligned & bold
-doc.moveDown(0.2);
-doc.font('Helvetica-Bold')
-   .fontSize(14)
-   .fillColor('#111')
-   .text('Competition Participation Confirmation', doc.page.margins.left, doc.y);
+  // Subtitle — right aligned & bold
+  doc.moveDown(0.2);
+  doc.font('Helvetica-Bold')
+     .fontSize(14)
+     .fillColor('#111')
+     .text('Competition Participation Confirmation', doc.page.margins.left, doc.y);
 
-// Rule across the full content width
-doc.moveDown(0.4);
-doc.moveTo(doc.page.margins.left, doc.y)
-   .lineTo(doc.page.width - doc.page.margins.right, doc.y)
-   .strokeColor('#999')
-   .stroke();
-doc.moveDown(0.8);
+  // Rule across the full content width
+  doc.moveDown(0.4);
+  doc.moveTo(doc.page.margins.left, doc.y)
+     .lineTo(doc.page.width - doc.page.margins.right, doc.y)
+     .strokeColor('#999')
+     .stroke();
+  doc.moveDown(0.8);
 
   // Body
   const line = (label, value) => {
@@ -312,6 +323,11 @@ doc.moveDown(0.8);
   line('Class', record.klass || '');
   line('Competition', comp);
   if (record.licenceType || record.licenceNo) line('Licence', [record.licenceType, record.licenceNo].filter(Boolean).join(' '));
+
+  // NEW: If F33 was ticked, include it above the "Verified by" line
+  if (record.f33 === 'Y' || record.f33 === true) {
+    line('F33', 'verified');
+  }
   line('Verified by Range Officer', roName);
 
   doc.moveDown(1.2);
@@ -387,15 +403,46 @@ function appendCheckinToDisk(row){
 ipcMain.handle('appendCheckin', async (_e, row) => { try { return { ok:true, file: appendCheckinToDisk(row) }; } catch(e){ return { ok:false, error:e.message }; } });
 
 // ---------- Finalise attendance (CSV + email) ----------
-ipcMain.handle('finalize-participation', async (_evt, { checkins = [], exportsDir = '', to = 'admin@prsci.org.au', shootDate } = {}) => {
+ipcMain.handle('finalize-participation', async (_evt, {
+  checkins = [],
+  exportsDir = '',
+  to = 'admin@prsci.org.au',
+  shootDate,
+  safetyBrief = {}           // <-- NEW
+} = {}) => {
   if (!Array.isArray(checkins) || checkins.length === 0) return { ok:false, error:'no-rows' };
+
+  // NEW: enforce Safety Brief presence (belt-and-braces validation)
+  const deliveredOk = safetyBrief && (safetyBrief.deliveredById || safetyBrief.deliveredByName);
+  const verifiedOk  = safetyBrief && (safetyBrief.verifiedById  || safetyBrief.verifiedByName);
+  if (!deliveredOk || !verifiedOk) {
+    return { ok:false, error:'missing-safety-brief' };
+  }
+
   const folder = exportsDir && fs.existsSync(exportsDir) ? exportsDir : (store.get('exportsDir') || path.join(app.getPath('documents'), 'PRSC', 'Participation'));
   fs.mkdirSync(folder, { recursive: true });
   const dateTag = shootDate || dayTag();
   const csvPath = path.join(folder, `PRSC_Participation_${dateTag}.csv`);
-  const headers = ['timestamp','shootDate','memberId','name','firearm','klass','competition','participationType','licenceType','licenceNo','licenceVerified','verifiedBy'];
+
+  // NEW: add 'f33' column (Y if verified, else blank) + Safety Brief columns
+  const headers = [
+    'timestamp','shootDate','memberId','name','Category','class','competition','participationType',
+    'licenceType','licenceNo','licenceVerified','verifiedBy','f33',
+    'safetyDeliveredBy','safetyVerifiedBy',
+  ];
   const esc = (v) => '"' + String(v ?? '').replace(/"/g,'""') + '"';
-  const csv = [headers.join(','), ...checkins.map(r => headers.map(h => esc(r[h])).join(','))].join('\n');
+  const csv = [
+    headers.join(','),
+    ...checkins.map(r => headers.map(h => {
+      switch (h) {
+        case 'safetyDeliveredBy':   return esc(safetyBrief.deliveredByName || '');
+        case 'safetyVerifiedBy':    return esc(safetyBrief.verifiedByName || '');
+        case 'class':               return esc(r.klass || ''); // <-- map header 'class' to data 'klass'
+        case 'Category':          return esc(r.firearm || ''); // NEW mapping
+        default:                    return esc(r[h]);
+      }
+    }).join(','))
+  ].join('\n');
   fs.writeFileSync(csvPath, csv, 'utf8');
 
   const { transporter, cfg } = getTransport();
